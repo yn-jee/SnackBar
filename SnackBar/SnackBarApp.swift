@@ -9,9 +9,11 @@ import SwiftUI
 
 @main
 struct SnackBarApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+
     var body: some Scene {
-        WindowGroup {
-            ContentView()
+        Settings {
+            EmptyView()  // 메뉴바 Agent 앱
         }
     }
 }
