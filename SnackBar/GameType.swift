@@ -19,4 +19,14 @@ enum GameType: String, CaseIterable, Identifiable {
     var displayName: String {
         return rawValue
     }
+    
+    var index: Int {
+        switch self {
+        case .sudoku: return 0
+        case .spellingNabi: return 1
+        case .mineSweeper: return 2
+        case .game2048: return 3
+        case .slidingPuzzle: return 4
+        }
+    }
 }

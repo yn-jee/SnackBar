@@ -8,13 +8,13 @@
 import SwiftUI
 
 struct GameSelectorView: View {
-    @ObservedObject var controller = MainGameController.shared
+    @ObservedObject var controller = MainViewController.shared
     @Namespace private var animationNamespace
-    @State private var selectedGame: GameType = MainGameController.shared.currentGame
+    @State private var selectedGame: GameType = MainViewController.shared.currentGame
+    @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
         VStack {
-            Spacer()
             HStack(spacing: 0) {
                 ForEach(GameType.allCases, id: \.self) { game in
                     Button(action: {
@@ -47,7 +47,16 @@ struct GameSelectorView: View {
                     .stroke(Color.accentColor, lineWidth: 1)
             )
             .padding(.horizontal)
-            Spacer()
+        }
+        .onAppear {
+            DispatchQueue.main.async {
+                controller.mainColor = controller.adjustedAccentColor(brightnessAdjustment: 0)
+            }
+        }
+        .onChange(of: colorScheme) {
+            DispatchQueue.main.async {
+                controller.mainColor = controller.adjustedAccentColor(brightnessAdjustment: 0)
+            }
         }
     }
 }

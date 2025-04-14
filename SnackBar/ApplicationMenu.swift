@@ -11,7 +11,7 @@ import SwiftUI
 class ApplicationMenu: NSObject {
     static let shared = ApplicationMenu() // 싱글톤
     
-    @ObservedObject var controller = MainGameController.shared
+    @ObservedObject var controller = MainViewController.shared
     var statusItem: NSStatusItem!
     var topView: NSHostingController<GameContainerView>?
     let popover = NSPopover()
@@ -21,7 +21,7 @@ class ApplicationMenu: NSObject {
 
         NotificationCenter.default.addObserver(forName: .gameDidChange, object: nil, queue: .main) { [weak self] _ in
             guard let self = self else { return }
-            let newSize = CGSize(width: self.controller.preferredWindowWidth, height: self.controller.totalHeight)
+            let newSize = CGSize(width: self.controller.contentWidth, height: self.controller.totalHeight)
             print("창 크기 조정됨: \(newSize.width)")
 //            self.topView?.view.frame.size = newSize
             self.popover.contentSize = newSize
@@ -40,7 +40,7 @@ class ApplicationMenu: NSObject {
         } else if let button = statusItem.button {
             let gameContainer = GameContainerView()
             topView = NSHostingController(rootView: gameContainer)
-            topView?.view.frame.size = CGSize(width: controller.preferredWindowWidth, height: self.controller.totalHeight)
+            topView?.view.frame.size = CGSize(width: controller.contentWidth, height: self.controller.totalHeight)
             popover.contentViewController = NSViewController()
             popover.contentViewController?.view = topView!.view
             popover.behavior = .transient

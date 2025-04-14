@@ -12,16 +12,17 @@ extension Notification.Name {
     static let gameDidChange = Notification.Name("gameDidChange")
 }
 
-final class MainGameController: ObservableObject {
-    static let shared = MainGameController()
+final class MainViewController: ObservableObject {
+    static let shared = MainViewController()
 
     @Published var currentGame: GameType = .sudoku
+    @Published var mainColor: Color = Color.accentColor
     
     var selectorHeight: CGFloat = 60
     var footerHeight: CGFloat = 22
     
     var totalHeight: CGFloat {
-        selectorHeight + contentMinHeight + footerHeight * 2 + 10   // menu item 개수만큼 + 패딩 10
+        selectorHeight + contentHeight + footerHeight * 2 + 10 + 2  // menu item 개수만큼 + 패딩 10 + Divider 2
     }
 
     private init() {
@@ -42,7 +43,7 @@ final class MainGameController: ObservableObject {
         }
     }
     
-    var preferredWindowWidth: CGFloat {
+    var contentWidth: CGFloat {
         switch currentGame {
         case .sudoku:
             return 380
@@ -53,18 +54,35 @@ final class MainGameController: ObservableObject {
         }
     }
     
-    var contentMinHeight: CGFloat {
+    var contentHeight: CGFloat {
         switch currentGame {
         case .sudoku:
-            return 450
+            return 420
+        case .spellingNabi:
+            return 420
+        case .mineSweeper:
+            return 420
         case .game2048:
             return 340
-        case .spellingNabi:
-            return 300
-        case .mineSweeper:
-            return 320
         default:
             return 300
         }
+    }
+    
+    func adjustedAccentColor(brightnessAdjustment: Double) -> Color {
+        let rgbColor = NSColor(Color.accentColor).usingColorSpace(.deviceRGB)!
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+
+        rgbColor.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        
+        // 밝기 조절
+        let adjustedRed = max(min(red + CGFloat(brightnessAdjustment), 1.0), 0.0)
+        let adjustedGreen = max(min(green + CGFloat(brightnessAdjustment), 1.0), 0.0)
+        let adjustedBlue = max(min(blue + CGFloat(brightnessAdjustment), 1.0), 0.0)
+        
+        return Color(NSColor(red: adjustedRed, green: adjustedGreen, blue: adjustedBlue, alpha: alpha))
     }
 }
