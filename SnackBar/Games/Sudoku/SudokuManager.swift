@@ -10,6 +10,7 @@ import Foundation
 final class SudokuManager: ObservableObject {
     static let shared = SudokuManager()
     
+    @Published var isSolved: Bool = SudokuStorage.shared.isSolved
     @Published var board: [[Int]] = SudokuStorage.shared.board
     @Published var solution: [[Int]] = SudokuStorage.shared.solution
     @Published var fixedCells: Set<String> = SudokuStorage.shared.fixedCells
@@ -40,6 +41,7 @@ final class SudokuManager: ObservableObject {
 
     func startTimer() {
         guard !isTimerRunning else { return }
+        guard !isSolved else { return }
         isTimerRunning = true
         startTime = Date()
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
@@ -198,6 +200,7 @@ final class SudokuManager: ObservableObject {
             return newRow
         }
 
+        shuffleSudoku(&board)
         return board
     }
 
@@ -210,6 +213,8 @@ final class SudokuManager: ObservableObject {
 
         let removeCount: Int
         switch difficulty {
+        case .debug:
+            removeCount = 1
         case .easy:
             removeCount = 30
         case .normal:
@@ -254,6 +259,16 @@ final class SudokuManager: ObservableObject {
         isSolutionDisplayed = false
     }
 
+    func isBoardCorrect() -> Bool {
+        for row in 0..<9 {
+            for col in 0..<9 {
+                if board[row][col] == 0 { return false }  // 아직 다 안 채워짐
+                if board[row][col] != solution[row][col] { return false }
+            }
+        }
+        return true
+    }
+    
     func updateCell(row: Int, col: Int, value: Int) {
         let key = "\(row)-\(col)"
         guard !fixedCells.contains(key) else { return }
@@ -306,8 +321,8 @@ final class SudokuManager: ObservableObject {
         self.solution = SudokuStorage.shared.solution
         self.fixedCells = SudokuStorage.shared.fixedCells
         self.pencilMarks = SudokuStorage.shared.pencilMarks
-        self.isSolutionDisplayed = false
         self.selectedCell = nil
+        self.isSolved = SudokuStorage.shared.isSolved 
     }
     
     func persistCurrentGame() {
@@ -321,5 +336,31 @@ final class SudokuManager: ObservableObject {
         SudokuStorage.shared.solution = self.solution
         SudokuStorage.shared.fixedCells = self.fixedCells
         SudokuStorage.shared.pencilMarks = self.pencilMarks
+        SudokuStorage.shared.isSolved = self.isSolved 
+    }
+    
+    private func shuffleSudoku(_ board: inout [[Int]]) {
+        for _ in 0..<10 {
+            // Swap rows within each band
+            for band in 0..<3 {
+                let row1 = band * 3 + Int.random(in: 0..<3)
+                let row2 = band * 3 + Int.random(in: 0..<3)
+                board.swapAt(row1, row2)
+            }
+
+            // Swap columns within each stack
+            for stack in 0..<3 {
+                let col1 = stack * 3 + Int.random(in: 0..<3)
+                let col2 = stack * 3 + Int.random(in: 0..<3)
+                for i in 0..<9 {
+                    board[i].swapAt(col1, col2)
+                }
+            }
+
+            // Transpose occasionally
+            if Bool.random() {
+                board = (0..<9).map { i in (0..<9).map { j in board[j][i] } }
+            }
+        }
     }
 }

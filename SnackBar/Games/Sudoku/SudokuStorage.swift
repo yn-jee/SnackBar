@@ -8,12 +8,17 @@
 import Foundation
 
 enum SudokuDifficulty: String, CaseIterable {
-    case easy, normal, hard, expert
+    case debug, easy, normal, hard, expert
 }
 
 final class SudokuStorage : ObservableObject {
     static let shared = SudokuStorage()
-
+    
+    var isSolved: Bool {
+        get { UserDefaults.standard.bool(forKey: "isSolved") }
+        set { UserDefaults.standard.set(newValue, forKey: "isSolved") }
+    }
+    
     private let successKey = "sudokuSuccessCount"
     private let giveUpKey = "sudokuGiveUpCount"
     
@@ -39,7 +44,7 @@ final class SudokuStorage : ObservableObject {
 
     var difficulty: SudokuDifficulty {
         get {
-            let raw = UserDefaults.standard.string(forKey: difficultyKey) ?? "easy"
+            let raw = UserDefaults.standard.string(forKey: difficultyKey) ?? "debug"
             return SudokuDifficulty(rawValue: raw) ?? .normal
         }
         set {

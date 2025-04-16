@@ -7,6 +7,7 @@
 
 import SwiftUI
 import AppKit
+import ConfettiSwiftUI
 
 struct KeyEventHandlingView: NSViewRepresentable {
     var onKeyDown: (NSEvent) -> Void
@@ -78,6 +79,13 @@ struct SudokuView: View {
     @ObservedObject var manager = SudokuManager.shared
     @ObservedObject var controller = MainViewController.shared
     @Environment(\.colorScheme) var colorScheme
+    @State private var showConfetti: Bool = false
+    @State private var solvedCount = UserDefaults.standard.integer(forKey: "sudokuSolvedCount")
+    @State private var confettiCount: Int = 0
+    @State private var showSaveMessage: Bool = false
+    @State private var selectedDifficulty: SudokuDifficulty = SudokuStorage.shared.difficulty
+    @State private var currentDifficulty: SudokuDifficulty = SudokuStorage.shared.difficulty
+    
 //    @StateObject private var gameTimer = GameTimer()
     
     @ViewBuilder
@@ -176,7 +184,7 @@ struct SudokuView: View {
         .scaleEffect(isSelected ? CGSize(width: 1.1, height: 1.1) : CGSize(width: 1.0, height: 1.0))
         .animation(.spring(response: 0.3, dampingFraction: 0.5, blendDuration: 0.2), value: isSelected)
         .overlay(
-            (manager.isSolutionDisplayed == false && !manager.isTimerRunning) ?
+            (manager.isSolutionDisplayed == false && !manager.isTimerRunning && !manager.isSolved) ?
             RoundedRectangle(cornerRadius: 5)
                 .fill(.ultraThinMaterial)
                 .clipShape(RoundedRectangle(cornerRadius: 5))
@@ -249,23 +257,46 @@ struct SudokuView: View {
 
     var body: some View {
         VStack {
-            Text(manager.formattedElapsedTime)
-                .font(.system(size: 12, weight: .regular))
-                .frame(maxWidth: .infinity)
-                .opacity(0.7)
+            HStack {
+                Text(manager.formattedElapsedTime)
+                    .font(.system(size: 12, weight: .regular))
+                    .frame(maxWidth: .infinity)
+                    .opacity(0.7)
+                Text("\(label(for: currentDifficulty))")
+                    .font(.system(size: 12, weight: .regular))
+                    .frame(maxWidth: .infinity)
+                    .opacity(0.7)
+            }
+            .frame(width: 150)
             
             ZStack {
                 VStack {
                     ZStack {
                         sudokuGrid
-                        //                            .overlay(
-                        //                                !gameTimer.isRunning ?
-                        //                                RoundedRectangle(cornerRadius: 5)
-                        //                                    .fill(.ultraThinMaterial)
-                        //                                    .opacity(0.8)
-                        //                                    .clipShape(RoundedRectangle(cornerRadius: 5))
-                        //                                : nil
-                        //                            )
+                            .confettiCannon(trigger: $confettiCount)
+                        
+                        if showConfetti {
+                            VStack {
+                                Spacer()
+                                Text("Congratulations!")
+                                    .font(.system(size: 16, weight: .heavy))
+                                Text("지금까지 푼 스도쿠: \(solvedCount)")
+                                    .font(.system(size: 11))
+                                    .padding(.top, 4)
+                                Spacer()
+                            }
+                            .frame(width: 200, height: 200)
+                            .background(
+                                Circle()
+                                    .fill(.ultraThinMaterial)
+                                    .blur(radius: 20)
+                                    .opacity(0.8)
+                                    .ignoresSafeArea()
+                            )
+                            .zIndex(11)
+                            .transition(.opacity)
+                            .animation(.easeOut(duration: 1.0), value: showConfetti)
+                        }
                     }
                     .frame(width: 288, height: 288)
                     
@@ -304,6 +335,21 @@ struct SudokuView: View {
                                         }
                                     } else {
                                         manager.updateCell(row: selected.row, col: selected.col, value: num)
+                                        
+                                        if manager.isBoardCorrect() {
+                                            manager.pauseTimer()
+                                            manager.isSolved = true
+                                            showConfetti = true
+                                            solvedCount += 1
+                                            confettiCount += 1
+                                            UserDefaults.standard.set(solvedCount, forKey: "sudokuSolvedCount")
+
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+                                            withAnimation(.easeOut(duration: 1.0)) {
+                                                showConfetti = false
+                                            }
+                                        }
+                                        }
                                     }
                                 }
                             }) {
@@ -338,15 +384,29 @@ struct SudokuView: View {
                         Button("정지/재개") {
                             manager.toggleTimer()
                         }
-                        .disabled((!manager.isTimerRunning && manager.isSolutionDisplayed))
-                        Button("난이도") { }
+                        .disabled((!manager.isTimerRunning && manager.isSolutionDisplayed) || manager.isSolved)
                         Button("새 게임") {
+                            showConfetti = false
+                            manager.isSolved = false
                             manager.generateNewPuzzle()
                             manager.resetTimer()
                             manager.startTimer()
+                            currentDifficulty = SudokuStorage.shared.difficulty
                         }
-                        Button("정답") {
+                        Button("포기") {
                             manager.showSolution()
+                        }
+                        .disabled((!manager.isTimerRunning && manager.isSolutionDisplayed) || manager.isSolved)
+                        Menu("난이도") {
+                            ForEach(SudokuDifficulty.allCases, id: \.self) { difficulty in
+                                if difficulty != .debug {
+                                    Button(label(for: difficulty)) {
+                                        selectedDifficulty = difficulty
+                                        SudokuStorage.shared.difficulty = difficulty
+                                        handleSettingChange()
+                                    }
+                                }
+                            }
                         }
                         Button("스탯") { }
                     }
@@ -368,6 +428,21 @@ struct SudokuView: View {
                             manager.updateCell(row: selected.row, col: selected.col, value: 0)
                         } else {
                             manager.updateCell(row: selected.row, col: selected.col, value: number)
+                            
+                            if manager.isBoardCorrect() {
+                                manager.pauseTimer()
+                                manager.isSolved = true
+                                showConfetti = true
+                                solvedCount += 1
+                                confettiCount += 1
+                                UserDefaults.standard.set(solvedCount, forKey: "sudokuSolvedCount")
+
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+                                    withAnimation(.easeOut(duration: 1.0)) {
+                                        showConfetti = false
+                                    }
+                                }
+                            }
                         }
                     }
                 } else if event.keyCode == 51 { // delete
@@ -375,6 +450,7 @@ struct SudokuView: View {
                         manager.updateCell(row: selected.row, col: selected.col, value: 0)
                     }
                 }
+                
             }
             .frame(width: 0, height: 0)
         }
@@ -385,7 +461,11 @@ struct SudokuView: View {
         .onAppear {
             DispatchQueue.main.async {
                 controller.mainColor = controller.adjustedAccentColor(brightnessAdjustment: 0)
-                manager.startTimer()
+                if manager.isSolved {
+                    manager.pauseTimer()
+                } else {
+                    manager.startTimer()
+                }
             }
         }
         .onChange(of: colorScheme) {
@@ -395,7 +475,11 @@ struct SudokuView: View {
         }
         .onChange(of: controller.currentGame) {
             if controller.currentGame == .sudoku {
-                manager.startTimer()
+                if manager.isSolved {
+                    manager.pauseTimer()
+                } else {
+                    manager.startTimer()
+                }
             } else {
                 manager.pauseTimer()
             }
@@ -417,6 +501,27 @@ struct SudokuView: View {
                 manager.pauseTimer()
                 manager.persistCurrentGame()
             }
+        }
+    }
+    
+    private func handleSettingChange() {
+        withAnimation {
+            showSaveMessage = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            withAnimation {
+                showSaveMessage = false
+            }
+        }
+    }
+    
+    private func label(for difficulty: SudokuDifficulty) -> String {
+        switch difficulty {
+        case .debug: return "디버그"
+        case .easy: return "쉬움"
+        case .normal: return "보통"
+        case .hard: return "어려움"
+        case .expert: return "전문가"
         }
     }
 }
