@@ -21,7 +21,6 @@ struct GameContainerView: View {
                         .frame(width: controller.contentWidth, height: controller.selectorHeight)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-//                .background(Color.white.opacity(0.3))
                 .offset(y: -20)
             }
             .frame(width: controller.contentWidth, height: controller.selectorHeight)
@@ -30,8 +29,6 @@ struct GameContainerView: View {
             Divider()
             
             VStack(spacing: 0) {
-//                MainGameAreaView()
-//                    .frame(minHeight: controller.contentHeight)
                 ZStack {
                     switch controller.currentGame {
                     case .sudoku:
@@ -57,10 +54,13 @@ struct GameContainerView: View {
 
                 VStack(spacing: 0) {
                     MenuRow(title: "설정", keyEquivalent: nil) {
-                        NSApp.terminate(nil)
+                        
                     }
                     MenuRow(title: "종료", keyEquivalent: "q") {
-                        NSApp.terminate(nil)
+                        NotificationCenter.default.post(name: .gameWindowDidClose, object: nil)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            NSApp.terminate(nil)
+                        }
                     }
                 }
                 .frame(height: controller.footerHeight * 2)
@@ -69,6 +69,16 @@ struct GameContainerView: View {
         }
         .frame(width: controller.contentWidth, height: controller.totalHeight)
         .background(Color.white.opacity(0.1))
+        .onChange(of: controller.currentGame) {
+            if controller.currentGame != .sudoku {
+                SudokuManager.shared.pauseTimer()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .gameWindowDidClose)) { _ in
+            if controller.currentGame == .sudoku {
+                SudokuManager.shared.pauseTimer()
+            }
+        }
     }
 }
 

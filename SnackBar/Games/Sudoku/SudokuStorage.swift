@@ -8,10 +8,10 @@
 import Foundation
 
 enum SudokuDifficulty: String, CaseIterable {
-    case easy, normal, hard
+    case easy, normal, hard, expert
 }
 
-class SudokuStorage {
+final class SudokuStorage : ObservableObject {
     static let shared = SudokuStorage()
 
     private let successKey = "sudokuSuccessCount"
@@ -39,14 +39,83 @@ class SudokuStorage {
 
     var difficulty: SudokuDifficulty {
         get {
-            let raw = UserDefaults.standard.string(forKey: difficultyKey) ?? "normal"
+            let raw = UserDefaults.standard.string(forKey: difficultyKey) ?? "easy"
             return SudokuDifficulty(rawValue: raw) ?? .normal
         }
         set {
             UserDefaults.standard.set(newValue.rawValue, forKey: difficultyKey)
         }
     }
-}
 
-// 현재 풀고 있는 문제랑 진행상황도 저장
-// 선택한 칸 안에 숫자가 적혀 있다면 그 숫자랑 같은 칸의 숫자들은 mainColor에 오패시티 약간 준 테두리로 표시되게 해줘
+    private let elapsedTimeKey = "sudokuElapsedSeconds"
+
+    var elapsedSeconds: Int {
+        get { UserDefaults.standard.integer(forKey: elapsedTimeKey) }
+        set { UserDefaults.standard.set(newValue, forKey: elapsedTimeKey) }
+    }
+
+    private let fixedCellsKey = "sudokuFixedCells"
+    private let solutionKey = "sudokuSolution"
+    private let boardKey = "sudokuBoard"
+    private let pencilMarksKey = "sudokuPencilMarks"
+
+    var fixedCells: Set<String> {
+        get {
+            if let data = UserDefaults.standard.data(forKey: fixedCellsKey),
+               let decoded = try? JSONDecoder().decode(Set<String>.self, from: data) {
+                return decoded
+            }
+            return []
+        }
+        set {
+            if let encoded = try? JSONEncoder().encode(newValue) {
+                UserDefaults.standard.set(encoded, forKey: fixedCellsKey)
+            }
+        }
+    }
+
+    var solution: [[Int]] {
+        get {
+            if let data = UserDefaults.standard.data(forKey: solutionKey),
+               let decoded = try? JSONDecoder().decode([[Int]].self, from: data) {
+                return decoded
+            }
+            return []
+        }
+        set {
+            if let encoded = try? JSONEncoder().encode(newValue) {
+                UserDefaults.standard.set(encoded, forKey: solutionKey)
+            }
+        }
+    }
+
+    var board: [[Int]] {
+        get {
+            if let data = UserDefaults.standard.data(forKey: boardKey),
+               let decoded = try? JSONDecoder().decode([[Int]].self, from: data) {
+                return decoded
+            }
+            return Array(repeating: Array(repeating: 0, count: 9), count: 9)
+        }
+        set {
+            if let encoded = try? JSONEncoder().encode(newValue) {
+                UserDefaults.standard.set(encoded, forKey: boardKey)
+            }
+        }
+    }
+
+    var pencilMarks: [[[Bool]]] {
+        get {
+            if let data = UserDefaults.standard.data(forKey: pencilMarksKey),
+               let decoded = try? JSONDecoder().decode([[[Bool]]].self, from: data) {
+                return decoded
+            }
+            return Array(repeating: Array(repeating: Array(repeating: false, count: 9), count: 9), count: 9)
+        }
+        set {
+            if let encoded = try? JSONEncoder().encode(newValue) {
+                UserDefaults.standard.set(encoded, forKey: pencilMarksKey)
+            }
+        }
+    }
+}
