@@ -32,14 +32,12 @@ final class SudokuStorage : ObservableObject {
         set { UserDefaults.standard.set(newValue, forKey: giveUpKey) }
     }
 
-    func recordSuccess() {
-        successCount += 1
+    func recordGiveUp() {
+        let current = UserDefaults.standard.integer(forKey: giveUpKey)
+        UserDefaults.standard.set(current + 1, forKey: giveUpKey)
+        print("포기: \(UserDefaults.standard.integer(forKey: giveUpKey))")
     }
 
-    func recordGiveUp() {
-        giveUpCount += 1
-    }
-    
     private let difficultyKey = "sudokuDifficulty"
 
     var difficulty: SudokuDifficulty {
@@ -122,5 +120,18 @@ final class SudokuStorage : ObservableObject {
                 UserDefaults.standard.set(encoded, forKey: pencilMarksKey)
             }
         }
+    }
+    
+    private let difficultySuccessPrefix = "sudokuSuccess_"
+
+    func successCount(for difficulty: SudokuDifficulty) -> Int {
+        return UserDefaults.standard.integer(forKey: difficultySuccessPrefix + difficulty.rawValue)
+    }
+
+    func recordSuccess(for difficulty: SudokuDifficulty) {
+        let key = difficultySuccessPrefix + difficulty.rawValue
+        let count = UserDefaults.standard.integer(forKey: key)
+        UserDefaults.standard.set(count + 1, forKey: key)
+        print("성공: \(UserDefaults.standard.integer(forKey: giveUpKey)), \(key)")
     }
 }

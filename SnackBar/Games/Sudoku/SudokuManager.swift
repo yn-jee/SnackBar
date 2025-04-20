@@ -9,8 +9,19 @@ import Foundation
 
 final class SudokuManager: ObservableObject {
     static let shared = SudokuManager()
+    @Published var isGeneratingPuzzle: Bool = false
     
-    @Published var isSolved: Bool = SudokuStorage.shared.isSolved
+    @Published var isSolved: Bool = SudokuStorage.shared.isSolved {
+        didSet {
+            SudokuStorage.shared.isSolved = isSolved
+        }
+    }
+
+    @Published var accumulatedSeconds: Int = SudokuStorage.shared.elapsedSeconds {
+        didSet {
+            SudokuStorage.shared.elapsedSeconds = accumulatedSeconds
+        }
+    }
     @Published var board: [[Int]] = SudokuStorage.shared.board
     @Published var solution: [[Int]] = SudokuStorage.shared.solution
     @Published var fixedCells: Set<String> = SudokuStorage.shared.fixedCells
@@ -19,12 +30,17 @@ final class SudokuManager: ObservableObject {
     @Published var isTimerRunning: Bool = false
     @Published var isSolutionDisplayed: Bool = false
     @Published var selectedCell: (row: Int, col: Int)? = nil
+    
+    @Published var isRestored: Bool = false     // 로딩 완료 플래그
+    @Published var wasRunningBeforeWindowHide: Bool = false
+    
     private var startTime: Date?
-    private var accumulatedSeconds: Int = SudokuStorage.shared.elapsedSeconds
     private var timer: Timer?
-
+    
     private init() {
         loadFromStorage()
+        self.isRestored = true
+        wasRunningBeforeWindowHide = UserDefaults.standard.bool(forKey: "sudokuWasRunning")
     }
     
     private var elapsedSecondsSnapshot: Int {
@@ -46,7 +62,7 @@ final class SudokuManager: ObservableObject {
         startTime = Date()
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
             DispatchQueue.main.async {
-                self.objectWillChange.send()
+                SudokuStorage.shared.elapsedSeconds += 1
             }
         }
     }
@@ -79,7 +95,13 @@ final class SudokuManager: ObservableObject {
     }
 
     func toggleTimer() {
-        isTimerRunning ? pauseTimer() : startTimer()
+        if isTimerRunning {
+            wasRunningBeforeWindowHide = false
+            pauseTimer()
+        } else {
+            wasRunningBeforeWindowHide = true
+            startTimer()
+        }
     }
 
     private func isValid(board: [[Int]], row: Int, col: Int, num: Int) -> Bool {
@@ -142,6 +164,7 @@ final class SudokuManager: ObservableObject {
                         backtrack(nextR, nextC)
                         board[r][c] = 0
                     }
+                    if count >= limit { return }
                 }
             }
         }
@@ -204,59 +227,66 @@ final class SudokuManager: ObservableObject {
         return board
     }
 
-    func generateNewPuzzle() {
-        let difficulty = SudokuStorage.shared.difficulty
-        print("선택된 난이도: \(difficulty)")
+    func generateNewPuzzle(completion: @escaping @Sendable () -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let difficulty = SudokuStorage.shared.difficulty
+            print("선택된 난이도: \(difficulty)")
 
-        var puzzle = generateSolvedBoard()
-        let fullSolution = puzzle
+            var puzzle = self.generateSolvedBoard()
+            let fullSolution = puzzle
 
-        let removeCount: Int
-        switch difficulty {
-        case .debug:
-            removeCount = 1
-        case .easy:
-            removeCount = 30
-        case .normal:
-            removeCount = 45
-        case .hard:
-            removeCount = 60
-        case .expert:
-            removeCount = 70
-        }
+            let removeCount: Int
+            switch difficulty {
+            case .debug:  removeCount = 1
+            case .easy:   removeCount = 30
+            case .normal: removeCount = 45
+            case .hard:   removeCount = 60
+            case .expert: removeCount = 70
+            }
 
-        var removed = 0
-        while removed < removeCount {
-            let row = Int.random(in: 0..<9)
-            let col = Int.random(in: 0..<9)
-            if puzzle[row][col] != 0 {
-                let original = puzzle[row][col]
+            var removed = 0
+            let allCells = (0..<81).shuffled()
+            for index in allCells {
+                if removed >= removeCount { break }
+                let row = index / 9
+                let col = index % 9
+                guard puzzle[row][col] != 0 else { continue }
+
+                let backup = puzzle[row][col]
                 puzzle[row][col] = 0
                 var testBoard = puzzle
-                if countSolutions(&testBoard) == 1 {
+                if self.countSolutions(&testBoard, limit: 2) == 1 {
                     removed += 1
                 } else {
-                    puzzle[row][col] = original
+                    puzzle[row][col] = backup
                 }
             }
-        }
 
-        self.board = puzzle
-        self.pencilMarks = Array(repeating: Array(repeating: Array(repeating: false, count: 9), count: 9), count: 9)
-        SudokuStorage.shared.pencilMarks = self.pencilMarks
-        self.solution = fullSolution
-        SudokuStorage.shared.solution = fullSolution
-        self.fixedCells = Set()
+            DispatchQueue.main.async {
+                self.board = puzzle
+                self.pencilMarks = Array(repeating: Array(repeating: Array(repeating: false, count: 9), count: 9), count: 9)
+                SudokuStorage.shared.pencilMarks = self.pencilMarks
+                self.solution = fullSolution
+                SudokuStorage.shared.solution = fullSolution
 
-        for row in 0..<9 {
-            for col in 0..<9 {
-                if puzzle[row][col] != 0 {
-                    fixedCells.insert("\(row)-\(col)")
+                // 🔧 Set 생성 로직 개선
+                let newFixed = (0..<9).flatMap { row in
+                    (0..<9).compactMap { col in
+                        puzzle[row][col] != 0 ? "\(row)-\(col)" : nil
+                    }
                 }
+                self.fixedCells = Set(newFixed)
+                SudokuStorage.shared.fixedCells = self.fixedCells
+
+                self.isSolutionDisplayed = false
+                self.isGeneratingPuzzle = false
+
+                print("✅ 저장 완료. fixedCells count = \(self.fixedCells.count)")
+                print("✅ 저장 완료. fixedCells = \(self.fixedCells.sorted())")
+
+                completion()
             }
         }
-        SudokuStorage.shared.fixedCells = fixedCells
-        isSolutionDisplayed = false
     }
 
     func isBoardCorrect() -> Bool {
@@ -290,7 +320,8 @@ final class SudokuManager: ObservableObject {
     }
     
     func markSuccess() {
-        SudokuStorage.shared.recordSuccess()
+        let difficulty = SudokuStorage.shared.difficulty
+        SudokuStorage.shared.recordSuccess(for: difficulty)
     }
 
     func markGiveUp() {
@@ -311,18 +342,28 @@ final class SudokuManager: ObservableObject {
     private func loadFromStorage() {
         let board = SudokuStorage.shared.board
         if board.flatMap({ $0 }).allSatisfy({ $0 == 0 }) {
-            generateNewPuzzle()
-            resetTimer()
+            self.isGeneratingPuzzle = true
+            self.resetTimer()
+
+            self.generateNewPuzzle {
+                self.startTimer()
+                self.isRestored = true  // 퍼즐 생성 후 복원 완료
+            }
             return
         }
-        
+
         self.accumulatedSeconds = SudokuStorage.shared.elapsedSeconds
         self.board = SudokuStorage.shared.board
         self.solution = SudokuStorage.shared.solution
         self.fixedCells = SudokuStorage.shared.fixedCells
         self.pencilMarks = SudokuStorage.shared.pencilMarks
         self.selectedCell = nil
-        self.isSolved = SudokuStorage.shared.isSolved 
+        self.isSolved = SudokuStorage.shared.isSolved
+
+        DispatchQueue.main.async {
+            self.isRestored = true  // 복원 완료 시점 뷰에게 알림
+        }
+        print("✅ 복원 완료. fixedCells = \(fixedCells.sorted())")
     }
     
     func persistCurrentGame() {
@@ -336,7 +377,7 @@ final class SudokuManager: ObservableObject {
         SudokuStorage.shared.solution = self.solution
         SudokuStorage.shared.fixedCells = self.fixedCells
         SudokuStorage.shared.pencilMarks = self.pencilMarks
-        SudokuStorage.shared.isSolved = self.isSolved 
+        SudokuStorage.shared.isSolved = self.isSolved
     }
     
     private func shuffleSudoku(_ board: inout [[Int]]) {

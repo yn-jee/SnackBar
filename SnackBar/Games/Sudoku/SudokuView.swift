@@ -81,10 +81,13 @@ struct SudokuView: View {
     @Environment(\.colorScheme) var colorScheme
     @State private var showConfetti: Bool = false
     @State private var solvedCount = UserDefaults.standard.integer(forKey: "sudokuSolvedCount")
+    @State private var giveUpCount: Int = UserDefaults.standard.integer(forKey: "sudokuGiveUpCount")
     @State private var confettiCount: Int = 0
     @State private var showSaveMessage: Bool = false
     @State private var selectedDifficulty: SudokuDifficulty = SudokuStorage.shared.difficulty
     @State private var currentDifficulty: SudokuDifficulty = SudokuStorage.shared.difficulty
+    
+    @State private var showStats: Bool = false
     
 //    @StateObject private var gameTimer = GameTimer()
     
@@ -94,7 +97,7 @@ struct SudokuView: View {
             .fill(((row / 3 + col / 3) % 2 == 0 ? Color.white.opacity(0.3) : Color.gray.opacity(0.2)))
             .frame(width: 30, height: 30)
             .overlay(
-                (manager.isTimerRunning && !manager.isSolutionDisplayed) ?
+                !(manager.isGeneratingPuzzle || (!manager.isTimerRunning && !manager.isSolved && !manager.isSolutionDisplayed)) ?
                 RoundedRectangle(cornerRadius: 5)
                     .stroke(isSelected ? Color.clear : Color.gray, lineWidth: 1)
                 : nil
@@ -148,7 +151,7 @@ struct SudokuView: View {
                                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                                 }
                             }
-                        }
+                            }
                     }
                 }
                 .transition(.opacity.combined(with: .scale))
@@ -166,8 +169,17 @@ struct SudokuView: View {
                        : controller.adjustedAccentColor(brightnessAdjustment: 0.3))
                 )
                 .scaleEffect(value == 0 ? 0 : 1)
-                .opacity(value == 0 ? 0 : 1)
-                .animation(.easeInOut(duration: 0.15), value: value)
+                .opacity(
+                    (manager.isSolutionDisplayed || manager.isSolved)
+                    ? 1  // 포기했거나 정답을 맞힌 경우 숫자 보임
+                    : (
+                        value == 0
+                        || manager.isGeneratingPuzzle
+                        || !manager.isTimerRunning
+                        || !manager.wasRunningBeforeWindowHide
+                    ) ? 0 : 1
+                )
+                .animation(.easeInOut(duration: 0.05), value: value)
         }
         .id("cell-\(row)-\(col)")
         .frame(width: 30, height: 30)
@@ -184,12 +196,41 @@ struct SudokuView: View {
         .scaleEffect(isSelected ? CGSize(width: 1.1, height: 1.1) : CGSize(width: 1.0, height: 1.0))
         .animation(.spring(response: 0.3, dampingFraction: 0.5, blendDuration: 0.2), value: isSelected)
         .overlay(
-            (manager.isSolutionDisplayed == false && !manager.isTimerRunning && !manager.isSolved) ?
             RoundedRectangle(cornerRadius: 5)
                 .fill(.ultraThinMaterial)
                 .clipShape(RoundedRectangle(cornerRadius: 5))
-            : nil
+                .opacity(
+                    (manager.isSolutionDisplayed || manager.isSolved)
+                    ? 0.0  // 포기했거나 정답을 맞힌 경우, 흐림 제거
+                    : (manager.isGeneratingPuzzle
+                       || !manager.isTimerRunning
+                       || !manager.wasRunningBeforeWindowHide)
+                        ? 1.0 : 0.0
+                )
+                .animation(
+                    .easeInOut(duration: 0.15),
+                    value: manager.isGeneratingPuzzle
+                        || !manager.isTimerRunning
+                        || !manager.wasRunningBeforeWindowHide
+                        || manager.isSolutionDisplayed
+                        || manager.isSolved// animation value로 포함시켜야 자연스럽게 사라짐
+                )
         )
+//        .overlay(
+//            (manager.isGeneratingPuzzle
+//             || !manager.isTimerRunning)
+//            ?
+//            RoundedRectangle(cornerRadius: 5)
+//                .fill(.ultraThinMaterial)
+//                .clipShape(RoundedRectangle(cornerRadius: 5))
+//            : nil
+//        )
+//        .opacity(
+//            (manager.isGeneratingPuzzle
+//             || !manager.isTimerRunning
+//             || manager.wasRunningBeforeWindowHide == false) ? 0.001 : 1.0
+//        )
+//        .animation(.none, value: manager.isTimerRunning)
     }
 
     private var sudokuGrid: some View {
@@ -244,8 +285,8 @@ struct SudokuView: View {
                                 }
                                 return false
                             }()
-                            let isFixed: Bool = manager.fixedCells.contains("\(row)-\(col)")
-
+                            let isFixed: Bool = manager.isRestored && manager.fixedCells.contains("\(row)-\(col)")
+                            
                             foregroundCell(row: row, col: col, value: value, isSelected: isSelected, isFixed: isFixed)
                         }
                     }
@@ -274,6 +315,23 @@ struct SudokuView: View {
                     ZStack {
                         sudokuGrid
                             .confettiCannon(trigger: $confettiCount)
+                        
+                        if manager.isGeneratingPuzzle {
+                            VStack {
+                                ProgressView("퍼즐 생성 중...")
+                                    .scaleEffect(0.8)
+                            }
+                            .frame(width: 286, height: 286)
+                            .background(
+                                Rectangle()
+                                    .fill(.ultraThinMaterial)
+                                    .opacity(0.5)
+                                    .cornerRadius(5)
+                            )
+                            .transition(.opacity)
+                            .animation(.easeInOut(duration: 0.3), value: manager.isGeneratingPuzzle)
+                            .zIndex(11)
+                        }
                         
                         if showConfetti {
                             VStack {
@@ -342,6 +400,7 @@ struct SudokuView: View {
                                             showConfetti = true
                                             solvedCount += 1
                                             confettiCount += 1
+                                            manager.markSuccess()
                                             UserDefaults.standard.set(solvedCount, forKey: "sudokuSolvedCount")
 
                                         DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
@@ -384,33 +443,84 @@ struct SudokuView: View {
                         Button("정지/재개") {
                             manager.toggleTimer()
                         }
-                        .disabled((!manager.isTimerRunning && manager.isSolutionDisplayed) || manager.isSolved)
+                        .disabled((!manager.isTimerRunning && manager.isSolutionDisplayed) || manager.isSolved
+                        || manager.isGeneratingPuzzle)
                         Button("새 게임") {
                             showConfetti = false
                             manager.isSolved = false
-                            manager.generateNewPuzzle()
                             manager.resetTimer()
-                            manager.startTimer()
-                            currentDifficulty = SudokuStorage.shared.difficulty
-                        }
-                        Button("포기") {
-                            manager.showSolution()
-                        }
-                        .disabled((!manager.isTimerRunning && manager.isSolutionDisplayed) || manager.isSolved)
-                        Menu("난이도") {
-                            ForEach(SudokuDifficulty.allCases, id: \.self) { difficulty in
-                                if difficulty != .debug {
-                                    Button(label(for: difficulty)) {
-                                        selectedDifficulty = difficulty
-                                        SudokuStorage.shared.difficulty = difficulty
-                                        handleSettingChange()
+                            manager.isGeneratingPuzzle = true
+
+                            Task.detached(priority: .userInitiated) {
+                                manager.generateNewPuzzle {
+                                    // 퍼즐 생성 완료 후 실행되는 블록
+                                    Task { @MainActor in
+                                        manager.isGeneratingPuzzle = false
+                                        currentDifficulty = SudokuStorage.shared.difficulty
+                                        
+                                        if NSApp.isActive {
+                                            manager.startTimer()
+                                            manager.wasRunningBeforeWindowHide = true  // 창이 떠 있는 동안 타이머 시작
+                                        } else {
+                                            manager.wasRunningBeforeWindowHide = true  // 창이 뜰 때까지 기억하기
+                                        }
                                     }
                                 }
                             }
                         }
-                        Button("스탯") { }
+                        
+                        Button("포기") {
+                            manager.showSolution()
+                            manager.markGiveUp()
+                        }
+                        .disabled((!manager.isTimerRunning && manager.isSolutionDisplayed) || manager.isSolved
+                        || manager.isGeneratingPuzzle)
+                        Menu("난이도") {
+                            ForEach(SudokuDifficulty.allCases, id: \.self) { difficulty in
+//                                if difficulty != .debug {
+                                    Button {
+                                        selectedDifficulty = difficulty
+                                        SudokuStorage.shared.difficulty = difficulty
+                                        handleSettingChange()
+                                    } label: {
+                                        Label(
+                                            title: {
+                                                Text(label(for: difficulty))
+                                                    .font(.system(size: 12))
+                                            },
+                                            icon: {
+                                                if selectedDifficulty == difficulty {
+                                                    Image(systemName: "checkmark")
+                                                        .imageScale(.small)
+                                                        .frame(width: 7, height: 7)
+                                                }
+                                            }
+                                        )
+                                    }
+                                    .labelStyle(.titleAndIcon)
+//                                }
+                            }
+                        }
+                        Menu("스탯") {
+                            Button(action: {}) {
+                                Text("총 푼 스도쿠: \(solvedCount) 개")
+                            }
+                            .disabled(true)
+
+                            ForEach(SudokuDifficulty.allCases, id: \.self) { diff in
+                                Button(action: {}) {
+                                    Text("\(label(for: diff)): \(SudokuStorage.shared.successCount(for: diff)) 개")
+                                }
+                                .disabled(true)
+                            }
+
+                            Button(action: {}) {
+                                Text("포기한 게임: \(SudokuStorage.shared.giveUpCount) 개")
+                            }
+                            .disabled(true)
+                        }
                     }
-                    .font(.system(size: 11, weight: .regular))
+                    .font(.system(size: 12, weight: .regular))
                     .buttonStyle(SubtleButtonStyle())
                 }
             }
@@ -435,6 +545,7 @@ struct SudokuView: View {
                                 showConfetti = true
                                 solvedCount += 1
                                 confettiCount += 1
+                                manager.markSuccess()
                                 UserDefaults.standard.set(solvedCount, forKey: "sudokuSolvedCount")
 
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
@@ -461,10 +572,18 @@ struct SudokuView: View {
         .onAppear {
             DispatchQueue.main.async {
                 controller.mainColor = controller.adjustedAccentColor(brightnessAdjustment: 0)
-                if manager.isSolved {
+
+                if !UserDefaults.standard.bool(forKey: "sudokuDidAlreadyStart") {
+                    manager.wasRunningBeforeWindowHide = UserDefaults.standard.bool(forKey: "sudokuWasRunning")
+                    UserDefaults.standard.set(true, forKey: "sudokuDidAlreadyStart")
+                }
+
+                if manager.isGeneratingPuzzle || manager.isSolved {
                     manager.pauseTimer()
-                } else {
+                } else if manager.wasRunningBeforeWindowHide {
                     manager.startTimer()
+                } else {
+                    manager.pauseTimer()
                 }
             }
         }
@@ -479,27 +598,39 @@ struct SudokuView: View {
                     manager.pauseTimer()
                 } else {
                     manager.startTimer()
+                    manager.wasRunningBeforeWindowHide = true  // 명시적으로 시작한 경우로 기록
                 }
             } else {
-                manager.pauseTimer()
+                DispatchQueue.main.async {
+                    if manager.isTimerRunning {
+                        manager.wasRunningBeforeWindowHide = true
+                    }
+                    manager.pauseTimer()
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .gameWindowDidClose)) { _ in
             DispatchQueue.main.async {
+                if manager.isTimerRunning {
+                    manager.wasRunningBeforeWindowHide = true
+                }
                 manager.pauseTimer()
-                manager.persistCurrentGame()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .gameWindowDidHide)) { _ in
             DispatchQueue.main.async {
+                if manager.isTimerRunning {
+                    manager.wasRunningBeforeWindowHide = true
+                }
                 manager.pauseTimer()
-                manager.persistCurrentGame()
             }
         }
         .onDisappear() {
             DispatchQueue.main.async {
+                if manager.isTimerRunning {
+                    manager.wasRunningBeforeWindowHide = true
+                }
                 manager.pauseTimer()
-                manager.persistCurrentGame()
             }
         }
     }
