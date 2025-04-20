@@ -43,15 +43,42 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc func popoverDidClose(notification: Notification) {
-        NotificationCenter.default.post(name: .gameWindowDidClose, object: nil)
+        // SwiftUI 팝오버 또는 메인 팝오버가 열려 있으면 무시
+        let isAnyPopoverVisible =
+            (popover?.isShown ?? false) ||
+            NSApp.windows.contains {
+                String(describing: type(of: $0)).contains("NSPopoverWindow") && $0.isVisible
+            }
+
+        if isAnyPopoverVisible { return }
+
+        NotificationCenter.default.post(name: .gameWindowDidHide, object: nil)
     }
     
     
     func windowWillClose(_ notification: Notification) {
-        NotificationCenter.default.post(name: .gameWindowDidClose, object: nil)
+        // SwiftUI 팝오버 또는 메인 팝오버가 열려 있으면 무시
+        let isAnyPopoverVisible =
+            (popover?.isShown ?? false) ||
+            NSApp.windows.contains {
+                String(describing: type(of: $0)).contains("NSPopoverWindow") && $0.isVisible
+            }
+
+        if isAnyPopoverVisible { return }
+
+        NotificationCenter.default.post(name: .gameWindowDidHide, object: nil)
     }
 
     func windowDidResignKey(_ notification: Notification) {
+        // SwiftUI 팝오버 또는 메인 팝오버가 열려 있으면 무시
+        let isAnyPopoverVisible =
+            (popover?.isShown ?? false) ||
+            NSApp.windows.contains {
+                String(describing: type(of: $0)).contains("NSPopoverWindow") && $0.isVisible
+            }
+
+        if isAnyPopoverVisible { return }
+
         NotificationCenter.default.post(name: .gameWindowDidHide, object: nil)
     }
 }

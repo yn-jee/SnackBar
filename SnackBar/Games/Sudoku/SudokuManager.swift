@@ -34,6 +34,8 @@ final class SudokuManager: ObservableObject {
     @Published var isRestored: Bool = false     // 로딩 완료 플래그
     @Published var wasRunningBeforeWindowHide: Bool = false
     
+    private var currentGenerationTask: DispatchWorkItem?    // 퍼즐 생성 중인지
+    
     private var startTime: Date?
     private var timer: Timer?
     
@@ -48,21 +50,26 @@ final class SudokuManager: ObservableObject {
     }
     
     var formattedElapsedTime: String {
-        let base = accumulatedSeconds
-        let total = base + (isTimerRunning && startTime != nil ? Int(Date().timeIntervalSince(startTime!)) : 0)
-        let minutes = total / 60
-        let seconds = total % 60
+        let minutes = elapsedSeconds / 60
+        let seconds = elapsedSeconds % 60
         return String(format: "%02d:%02d", minutes, seconds)
     }
 
+    @Published var elapsedSeconds: Int = 0
+
     func startTimer() {
         guard !isTimerRunning else { return }
-        guard !isSolved else { return }
         isTimerRunning = true
         startTime = Date()
+        
+        // 타이머 시작 딜레이 없도록 즉시 1회 반영
+        DispatchQueue.main.async {
+            self.elapsedSeconds = self.accumulatedSeconds
+        }
+
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
             DispatchQueue.main.async {
-                SudokuStorage.shared.elapsedSeconds += 1
+                self.elapsedSeconds = self.accumulatedSeconds + Int(Date().timeIntervalSince(self.startTime ?? Date()))
             }
         }
     }
@@ -228,38 +235,58 @@ final class SudokuManager: ObservableObject {
     }
 
     func generateNewPuzzle(completion: @escaping @Sendable () -> Void) {
-        DispatchQueue.global(qos: .userInitiated).async {
-            let difficulty = SudokuStorage.shared.difficulty
-            print("선택된 난이도: \(difficulty)")
+        currentGenerationTask?.cancel()
+        
+        let task = DispatchWorkItem {
+            let difficultySnapshot = SudokuStorage.shared.difficulty
+            print("선택된 난이도: \(difficultySnapshot)")
 
             var puzzle = self.generateSolvedBoard()
             let fullSolution = puzzle
 
+            // 난이도별 제거 개수
             let removeCount: Int
-            switch difficulty {
-            case .debug:  removeCount = 1
-            case .easy:   removeCount = 30
-            case .normal: removeCount = 45
-            case .hard:   removeCount = 60
-            case .expert: removeCount = 70
+            print("선택된 난이도: \(difficultySnapshot)")
+            switch difficultySnapshot {
+                case .debug:  removeCount = 1
+                case .easy:   removeCount = 30
+                case .normal: removeCount = 45
+                case .hard:   removeCount = 53
+                case .expert: removeCount = 64
             }
+            
+            SudokuStorage.shared.recordSuccess(for: difficultySnapshot)
 
+            let baseOrder = Self.generateCellDigOrder()
+            var candidateOrder = baseOrder
             var removed = 0
-            let allCells = (0..<81).shuffled()
-            for index in allCells {
-                if removed >= removeCount { break }
-                let row = index / 9
-                let col = index % 9
-                guard puzzle[row][col] != 0 else { continue }
+            var tried = Set<String>()
 
-                let backup = puzzle[row][col]
-                puzzle[row][col] = 0
-                var testBoard = puzzle
-                if self.countSolutions(&testBoard, limit: 2) == 1 {
-                    removed += 1
-                } else {
-                    puzzle[row][col] = backup
+            for attempt in 0..<3 {
+                for (row, col) in candidateOrder {
+                    guard removed < removeCount else { break }
+                    guard puzzle[row][col] != 0 else { continue }
+
+                    let key = "\(row)-\(col)"
+                    if tried.contains(key) { continue }
+
+                    let backup = puzzle[row][col]
+                    puzzle[row][col] = 0
+
+                    var testBoard = puzzle
+                    if self.countSolutions(&testBoard, limit: 2) == 1 {
+                        removed += 1
+                    } else {
+                        puzzle[row][col] = backup
+                        tried.insert(key)
+                    }
                 }
+
+                // 목표 도달 시 break
+                if removed >= removeCount { break }
+
+                // 다음 시도용 셀 셔플
+                candidateOrder = baseOrder.shuffled()
             }
 
             DispatchQueue.main.async {
@@ -269,7 +296,6 @@ final class SudokuManager: ObservableObject {
                 self.solution = fullSolution
                 SudokuStorage.shared.solution = fullSolution
 
-                // 🔧 Set 생성 로직 개선
                 let newFixed = (0..<9).flatMap { row in
                     (0..<9).compactMap { col in
                         puzzle[row][col] != 0 ? "\(row)-\(col)" : nil
@@ -287,8 +313,70 @@ final class SudokuManager: ObservableObject {
                 completion()
             }
         }
+        
+        currentGenerationTask = task
+        DispatchQueue.global(qos: .userInitiated).async(execute: task)
+    }
+    
+    private static func generateCellDigOrder() -> [(Int, Int)] {
+        var order: [(Int, Int)] = []
+
+        for row in 0..<9 {
+            if row % 2 == 0 {
+                for col in 0..<9 {
+                    order.append((row, col))
+                }
+            } else {
+                for col in (0..<9).reversed() {
+                    order.append((row, col))
+                }
+            }
+        }
+
+        return order.shuffled() // 랜덤화 가능
     }
 
+    func estimateDifficulty(for board: [[Int]]) -> Int {
+        var score = 0
+
+        for row in 0..<9 {
+            for col in 0..<9 {
+                if board[row][col] == 0 {
+                    var possible = Set(1...9)
+
+                    // 행
+                    for i in 0..<9 { possible.remove(board[row][i]) }
+                    // 열
+                    for i in 0..<9 { possible.remove(board[i][col]) }
+                    // 박스
+                    let startRow = row / 3 * 3
+                    let startCol = col / 3 * 3
+                    for i in 0..<3 {
+                        for j in 0..<3 {
+                            possible.remove(board[startRow + i][startCol + j])
+                        }
+                    }
+
+                    // 점수 부여 기준
+                    switch possible.count {
+                    case 1:
+                        score += 1 // Naked Single
+                    case 2:
+                        score += 2 // Hidden Single 가능성 있음
+                    case 3...4:
+                        score += 3 // Naked Pair 또는 Hidden Pair 가능성
+                    case 5...6:
+                        score += 5 // X-Wing 또는 Medium급 기법 필요
+                    default:
+                        score += 7 // Hard급 기법 필요
+                    }
+                }
+            }
+        }
+
+        return score
+    }
+    
     func isBoardCorrect() -> Bool {
         for row in 0..<9 {
             for col in 0..<9 {

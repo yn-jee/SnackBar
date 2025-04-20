@@ -87,7 +87,10 @@ struct SudokuView: View {
     @State private var selectedDifficulty: SudokuDifficulty = SudokuStorage.shared.difficulty
     @State private var currentDifficulty: SudokuDifficulty = SudokuStorage.shared.difficulty
     
-    @State private var showStats: Bool = false
+    @State private var isStatsPresented: Bool = false
+    
+    @State private var hasFullyAppearedOnce = false
+    @State private var isReopenedFromClose = false
     
 //    @StateObject private var gameTimer = GameTimer()
     
@@ -113,125 +116,6 @@ struct SudokuView: View {
 //            )
     }
     
-    @ViewBuilder
-    private func foregroundCell(row: Int, col: Int, value: Int, isSelected: Bool, isFixed: Bool) -> some View {
-        ZStack {
-            // Check if the value matches the selected cell's value
-            let isSameAsSelected = {
-                if let selected = manager.selectedCell {
-                    return manager.board[selected.row][selected.col] != 0 &&
-                           manager.board[selected.row][selected.col] == value &&
-                           (selected.row != row || selected.col != col)
-                }
-                return false
-            }()
-            
-            // Add overlay if value matches and is not zero
-            if value != 0 && isSameAsSelected {
-                RoundedRectangle(cornerRadius: 5)
-                    .stroke(controller.mainColor.opacity(0.7), lineWidth: 2)
-                    .strokeBorder(controller.mainColor.opacity(0.7), lineWidth: 3)
-                    .padding(1)
-            }
-
-            // Pencil marks view (value == 0)
-            if value == 0 {
-                VStack(spacing: 0) {
-                    ForEach(0..<3, id: \.self) { subRow in
-                        HStack(spacing: 0) {
-                            ForEach(0..<3, id: \.self) { subCol in
-                                let pencilValue = subRow * 3 + subCol
-                                if manager.pencilMarks[row][col][pencilValue] {
-                                    Text("\(pencilValue + 1)")
-                                        .font(.system(size: 8, weight: .semibold))
-                                        .foregroundColor(.primary.opacity(0.6))
-                                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                                } else {
-                                    Spacer()
-                                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                }
-                            }
-                            }
-                    }
-                }
-                .transition(.opacity.combined(with: .scale))
-                .animation(.easeInOut(duration: 0.15), value: value)
-            }
-
-            // Main number view (value != 0)
-            Text("\(value)")
-                .font(.system(size: 14, weight: .bold))
-                .foregroundColor(
-                    isFixed
-                    ? (colorScheme == .light ? Color.black : Color.white)
-                    : (colorScheme == .light
-                       ? controller.adjustedAccentColor(brightnessAdjustment: -0.3)
-                       : controller.adjustedAccentColor(brightnessAdjustment: 0.3))
-                )
-                .scaleEffect(value == 0 ? 0 : 1)
-                .opacity(
-                    (manager.isSolutionDisplayed || manager.isSolved)
-                    ? 1  // 포기했거나 정답을 맞힌 경우 숫자 보임
-                    : (
-                        value == 0
-                        || manager.isGeneratingPuzzle
-                        || !manager.isTimerRunning
-                        || !manager.wasRunningBeforeWindowHide
-                    ) ? 0 : 1
-                )
-                .animation(.easeInOut(duration: 0.05), value: value)
-        }
-        .id("cell-\(row)-\(col)")
-        .frame(width: 30, height: 30)
-        .background(Color.clear)
-        .overlay(
-            RoundedRectangle(cornerRadius: 5)
-                .stroke(isSelected ? controller.mainColor : Color.clear, lineWidth: 2)
-                .padding(1)
-        )
-        .contentShape(Rectangle())
-        .onTapGesture {
-            manager.selectedCell = (row, col)
-        }
-        .scaleEffect(isSelected ? CGSize(width: 1.1, height: 1.1) : CGSize(width: 1.0, height: 1.0))
-        .animation(.spring(response: 0.3, dampingFraction: 0.5, blendDuration: 0.2), value: isSelected)
-        .overlay(
-            RoundedRectangle(cornerRadius: 5)
-                .fill(.ultraThinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 5))
-                .opacity(
-                    (manager.isSolutionDisplayed || manager.isSolved)
-                    ? 0.0  // 포기했거나 정답을 맞힌 경우, 흐림 제거
-                    : (manager.isGeneratingPuzzle
-                       || !manager.isTimerRunning
-                       || !manager.wasRunningBeforeWindowHide)
-                        ? 1.0 : 0.0
-                )
-                .animation(
-                    .easeInOut(duration: 0.15),
-                    value: manager.isGeneratingPuzzle
-                        || !manager.isTimerRunning
-                        || !manager.wasRunningBeforeWindowHide
-                        || manager.isSolutionDisplayed
-                        || manager.isSolved// animation value로 포함시켜야 자연스럽게 사라짐
-                )
-        )
-//        .overlay(
-//            (manager.isGeneratingPuzzle
-//             || !manager.isTimerRunning)
-//            ?
-//            RoundedRectangle(cornerRadius: 5)
-//                .fill(.ultraThinMaterial)
-//                .clipShape(RoundedRectangle(cornerRadius: 5))
-//            : nil
-//        )
-//        .opacity(
-//            (manager.isGeneratingPuzzle
-//             || !manager.isTimerRunning
-//             || manager.wasRunningBeforeWindowHide == false) ? 0.001 : 1.0
-//        )
-//        .animation(.none, value: manager.isTimerRunning)
-    }
 
     private var sudokuGrid: some View {
         ZStack(alignment: .topLeading) {
@@ -286,8 +170,31 @@ struct SudokuView: View {
                                 return false
                             }()
                             let isFixed: Bool = manager.isRestored && manager.fixedCells.contains("\(row)-\(col)")
+                            let selectedValue = manager.selectedCell.map { manager.board[$0.row][$0.col] }
+
+                            let isSameAsSelected = selectedValue != nil &&
+                                                   selectedValue != 0 &&
+                                                   selectedValue == manager.board[row][col] &&
+                                                   (manager.selectedCell?.row != row || manager.selectedCell?.col != col)
                             
-                            foregroundCell(row: row, col: col, value: value, isSelected: isSelected, isFixed: isFixed)
+                            SudokuCellView(
+                                row: row,
+                                col: col,
+                                value: manager.board[row][col],
+                                isSelected: isSelected,
+                                isFixed: isFixed,
+                                pencilMarks: manager.pencilMarks[row][col],
+                                isSolutionDisplayed: manager.isSolutionDisplayed,
+                                isSolved: manager.isSolved,
+                                isGenerating: manager.isGeneratingPuzzle,
+                                isTimerRunning: manager.isTimerRunning,
+                                wasRunningBeforeWindowHide: manager.wasRunningBeforeWindowHide,
+                                mainColor: controller.mainColor,
+                                colorScheme: colorScheme,
+                                onTap: {
+                                    manager.selectedCell = (row, col)
+                                }
+                            )
                         }
                     }
                 }
@@ -314,7 +221,16 @@ struct SudokuView: View {
                 VStack {
                     ZStack {
                         sudokuGrid
-                            .confettiCannon(trigger: $confettiCount)
+                            .overlay(
+                                manager.isGeneratingPuzzle ?
+                                RoundedRectangle(cornerRadius: 5)
+                                    .fill(.ultraThinMaterial)
+                                    .opacity(0.5)
+                                    .transition(.opacity)
+                                    .animation(.easeInOut(duration: 0.3), value: manager.isGeneratingPuzzle)
+                                : nil
+                            )
+                            .zIndex(0)
                         
                         if manager.isGeneratingPuzzle {
                             VStack {
@@ -322,14 +238,6 @@ struct SudokuView: View {
                                     .scaleEffect(0.8)
                             }
                             .frame(width: 286, height: 286)
-                            .background(
-                                Rectangle()
-                                    .fill(.ultraThinMaterial)
-                                    .opacity(0.5)
-                                    .cornerRadius(5)
-                            )
-                            .transition(.opacity)
-                            .animation(.easeInOut(duration: 0.3), value: manager.isGeneratingPuzzle)
                             .zIndex(11)
                         }
                         
@@ -443,9 +351,13 @@ struct SudokuView: View {
                         Button("정지/재개") {
                             manager.toggleTimer()
                         }
-                        .disabled((!manager.isTimerRunning && manager.isSolutionDisplayed) || manager.isSolved
-                        || manager.isGeneratingPuzzle)
+                        .disabled(
+                            manager.isSolutionDisplayed
+                            || manager.isSolved
+                            || manager.isGeneratingPuzzle
+                        )
                         Button("새 게임") {
+                            SudokuStorage.shared.difficulty = selectedDifficulty
                             showConfetti = false
                             manager.isSolved = false
                             manager.resetTimer()
@@ -473,14 +385,16 @@ struct SudokuView: View {
                             manager.showSolution()
                             manager.markGiveUp()
                         }
-                        .disabled((!manager.isTimerRunning && manager.isSolutionDisplayed) || manager.isSolved
-                        || manager.isGeneratingPuzzle)
+                        .disabled(
+                            manager.isSolutionDisplayed
+                            || manager.isSolved
+                            || manager.isGeneratingPuzzle
+                        )
                         Menu("난이도") {
                             ForEach(SudokuDifficulty.allCases, id: \.self) { difficulty in
 //                                if difficulty != .debug {
                                     Button {
                                         selectedDifficulty = difficulty
-                                        SudokuStorage.shared.difficulty = difficulty
                                         handleSettingChange()
                                     } label: {
                                         Label(
@@ -501,29 +415,29 @@ struct SudokuView: View {
 //                                }
                             }
                         }
-                        Menu("스탯") {
-                            Button(action: {}) {
+                        Button("스탯") {
+                            isStatsPresented.toggle()
+                        }
+                        .popover(isPresented: $isStatsPresented, arrowEdge: .bottom) {
+                            VStack(alignment: .leading, spacing: 8) {
                                 Text("총 푼 스도쿠: \(solvedCount) 개")
-                            }
-                            .disabled(true)
 
-                            ForEach(SudokuDifficulty.allCases, id: \.self) { diff in
-                                Button(action: {}) {
+                                ForEach(SudokuDifficulty.allCases, id: \.self) { diff in
                                     Text("\(label(for: diff)): \(SudokuStorage.shared.successCount(for: diff)) 개")
                                 }
-                                .disabled(true)
-                            }
 
-                            Button(action: {}) {
                                 Text("포기한 게임: \(SudokuStorage.shared.giveUpCount) 개")
                             }
-                            .disabled(true)
+                            .padding()
+                            .frame(width: 150)
                         }
                     }
                     .font(.system(size: 12, weight: .regular))
                     .buttonStyle(SubtleButtonStyle())
                 }
             }
+            .confettiCannon(trigger: $confettiCount)
+            
             KeyEventHandlingView { event in
                 if let selected = manager.selectedCell,
                    let chars = event.charactersIgnoringModifiers,
@@ -570,21 +484,8 @@ struct SudokuView: View {
         }
         .padding()
         .onAppear {
-            DispatchQueue.main.async {
-                controller.mainColor = controller.adjustedAccentColor(brightnessAdjustment: 0)
-
-                if !UserDefaults.standard.bool(forKey: "sudokuDidAlreadyStart") {
-                    manager.wasRunningBeforeWindowHide = UserDefaults.standard.bool(forKey: "sudokuWasRunning")
-                    UserDefaults.standard.set(true, forKey: "sudokuDidAlreadyStart")
-                }
-
-                if manager.isGeneratingPuzzle || manager.isSolved {
-                    manager.pauseTimer()
-                } else if manager.wasRunningBeforeWindowHide {
-                    manager.startTimer()
-                } else {
-                    manager.pauseTimer()
-                }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                initializeView()
             }
         }
         .onChange(of: colorScheme) {
@@ -643,6 +544,29 @@ struct SudokuView: View {
             withAnimation {
                 showSaveMessage = false
             }
+        }
+    }
+    
+    private func initializeView() {
+        controller.mainColor = controller.adjustedAccentColor(brightnessAdjustment: 0)
+
+        if !UserDefaults.standard.bool(forKey: "sudokuDidAlreadyStart") {
+            manager.wasRunningBeforeWindowHide = UserDefaults.standard.bool(forKey: "sudokuWasRunning")
+            UserDefaults.standard.set(true, forKey: "sudokuDidAlreadyStart")
+        }
+
+        // 포기한 상태면 무조건 멈추고 종료
+        if manager.isSolutionDisplayed || manager.isSolved {
+            manager.pauseTimer()
+            return
+        }
+
+        if manager.isGeneratingPuzzle || manager.isSolved {
+            manager.pauseTimer()
+        } else if manager.wasRunningBeforeWindowHide {
+            manager.startTimer()
+        } else {
+            manager.pauseTimer()
         }
     }
     
